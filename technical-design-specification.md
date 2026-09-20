@@ -651,7 +651,7 @@ The installer:
 
 ### launchd scheduling
 
-The LaunchAgent runs the scanner periodically via `StartInterval`. By default, this is every 3600 seconds (1 hour) but earlier configs might have used lower intervals. The exact frequency of heavy disk scans vs RAID checks is driven by the `scheduled` mode and the limits assigned within `config.json` (`schedule.raidCheckIntervalMinutes` and `schedule.fileScanIntervalHours`).
+The LaunchAgent runs the scanner periodically via `StartInterval`. By default, this is every 300 seconds (5 minutes), matching `schedule.raidCheckIntervalMinutes`. The exact frequency of heavy disk scans vs RAID checks is driven by the `scheduled` mode and the limits assigned within `config.json` (`schedule.raidCheckIntervalMinutes` and `schedule.fileScanIntervalHours`).
 
 `RunAtLoad` is `false` — the scanner does not run immediately on login, only on schedule. To run manually at any time:
 
