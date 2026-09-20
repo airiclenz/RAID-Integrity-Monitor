@@ -260,10 +260,10 @@ public struct HashUpgradeScanner {
 	// ============================================================================
 	/// Perform the verify-and-upgrade work for a single file in one pass.
 	///
-	/// Reads the file once, feeding each chunk to both the old and new hasher
-	/// simultaneously. This halves the I/O compared to two separate full reads.
-	/// Wrapped in autoreleasepool to contain Foundation memory allocations
-	/// (FileHandle/Data buffers).
+	/// Reads the file once through `ChunkedFileReader`, feeding each chunk to
+	/// both the old and new hasher simultaneously. This halves the I/O compared
+	/// to two separate full reads, and the single reusable POSIX buffer means no
+	/// per-chunk `Data` objects accumulate while a large file is hashed.
 	nonisolated private func upgradeFile(
 		record: FileRecord,
 		oldHasher: any FileHasher,
@@ -271,107 +271,84 @@ public struct HashUpgradeScanner {
 		newAlgorithm: String,
 		onProgress: HashProgressHandler?
 	) -> FileUpgradeResult {
-		autoreleasepool {
-			let url = URL(fileURLWithPath: record.path)
+		let url = URL(fileURLWithPath: record.path)
+		let chunkSize = 4 * 1024 * 1024
+		var bytesProcessed: Int64 = 0
 
-			let handle: FileHandle
-			do {
-				handle = try FileHandle(forReadingFrom: url)
-			} catch {
-				logger.warn("Cannot read \(Logger.c(record.path, .cyan)): \(error) — skipping")
-				return .skipped(path: record.path)
-			}
-			defer { try? handle.close() }
+		// Prepare both hashers for streaming
+		var oldSHA = CryptoKit.SHA256()
+		var oldBLAKE3State = blake3_hasher()
+		let oldIsSHA256 = (oldHasher.algorithmName == "sha256")
 
-			let totalSize = Int64(
-				(try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-			)
-			let chunkSize = 4 * 1024 * 1024
-			var bytesProcessed: Int64 = 0
+		var newSHA = CryptoKit.SHA256()
+		var newBLAKE3State = blake3_hasher()
+		let newIsSHA256 = (newHasher.algorithmName == "sha256")
 
-			// Prepare both hashers for streaming
-			var oldSHA = CryptoKit.SHA256()
-			var oldBLAKE3State = blake3_hasher()
-			let oldIsSHA256 = (oldHasher.algorithmName == "sha256")
+		if !oldIsSHA256 { blake3_hasher_init(&oldBLAKE3State) }
+		if !newIsSHA256 { blake3_hasher_init(&newBLAKE3State) }
 
-			var newSHA = CryptoKit.SHA256()
-			var newBLAKE3State = blake3_hasher()
-			let newIsSHA256 = (newHasher.algorithmName == "sha256")
-
-			if !oldIsSHA256 { blake3_hasher_init(&oldBLAKE3State) }
-			if !newIsSHA256 { blake3_hasher_init(&newBLAKE3State) }
-
-			// Single-pass: read each chunk once, feed to both hashers
-			while true {
-				let chunk: Data
-				do {
-					chunk = try handle.read(upToCount: chunkSize) ?? Data()
-				} catch {
-					logger.warn("Cannot read \(Logger.c(record.path, .cyan)): \(error) — skipping")
-					return .skipped(path: record.path)
-				}
-				if chunk.isEmpty { break }
-
+		// Single-pass: read each chunk once, feed to both hashers
+		do {
+			try ChunkedFileReader.forEachChunk(of: url, chunkSize: chunkSize) { chunk, totalSize in
 				// Feed old hasher
 				if oldIsSHA256 {
-					oldSHA.update(data: chunk)
+					oldSHA.update(bufferPointer: chunk)
 				} else {
-					chunk.withUnsafeBytes { buf in
-						blake3_hasher_update(&oldBLAKE3State, buf.baseAddress, buf.count)
-					}
+					blake3_hasher_update(&oldBLAKE3State, chunk.baseAddress, chunk.count)
 				}
 
 				// Feed new hasher
 				if newIsSHA256 {
-					newSHA.update(data: chunk)
+					newSHA.update(bufferPointer: chunk)
 				} else {
-					chunk.withUnsafeBytes { buf in
-						blake3_hasher_update(&newBLAKE3State, buf.baseAddress, buf.count)
-					}
+					blake3_hasher_update(&newBLAKE3State, chunk.baseAddress, chunk.count)
 				}
 
 				bytesProcessed += Int64(chunk.count)
 				onProgress?(bytesProcessed, totalSize)
 			}
-
-			// Finalize old hash
-			let oldHash: String
-			if oldIsSHA256 {
-				oldHash = oldSHA.finalize().map { String(format: "%02x", $0) }.joined()
-			} else {
-				var output = [UInt8](repeating: 0, count: Int(BLAKE3_OUT_LEN))
-				blake3_hasher_finalize(&oldBLAKE3State, &output, Int(BLAKE3_OUT_LEN))
-				oldHash = output.map { String(format: "%02x", $0) }.joined()
-			}
-
-			// Verify old hash
-			if oldHash != record.hash {
-				var corruptedRecord = record
-				corruptedRecord.status = .corrupted
-				return .corrupted(
-					corruptedRecord,
-					storedHashPrefix: String(record.hash.prefix(8)),
-					computedHashPrefix: String(oldHash.prefix(8))
-				)
-			}
-
-			// Finalize new hash
-			let newHash: String
-			if newIsSHA256 {
-				newHash = newSHA.finalize().map { String(format: "%02x", $0) }.joined()
-			} else {
-				var output = [UInt8](repeating: 0, count: Int(BLAKE3_OUT_LEN))
-				blake3_hasher_finalize(&newBLAKE3State, &output, Int(BLAKE3_OUT_LEN))
-				newHash = output.map { String(format: "%02x", $0) }.joined()
-			}
-
-			var upgradedRecord = record
-			upgradedRecord.hash = newHash
-			upgradedRecord.hashAlgorithm = newAlgorithm
-			upgradedRecord.lastVerified = Date()
-			upgradedRecord.status = .ok
-			return .upgraded(upgradedRecord)
+		} catch {
+			logger.warn("Cannot read \(Logger.c(record.path, .cyan)): \(error) — skipping")
+			return .skipped(path: record.path)
 		}
+
+		// Finalize old hash
+		let oldHash: String
+		if oldIsSHA256 {
+			oldHash = oldSHA.finalize().map { String(format: "%02x", $0) }.joined()
+		} else {
+			var output = [UInt8](repeating: 0, count: Int(BLAKE3_OUT_LEN))
+			blake3_hasher_finalize(&oldBLAKE3State, &output, Int(BLAKE3_OUT_LEN))
+			oldHash = output.map { String(format: "%02x", $0) }.joined()
+		}
+
+		// Verify old hash
+		if oldHash != record.hash {
+			var corruptedRecord = record
+			corruptedRecord.status = .corrupted
+			return .corrupted(
+				corruptedRecord,
+				storedHashPrefix: String(record.hash.prefix(8)),
+				computedHashPrefix: String(oldHash.prefix(8))
+			)
+		}
+
+		// Finalize new hash
+		let newHash: String
+		if newIsSHA256 {
+			newHash = newSHA.finalize().map { String(format: "%02x", $0) }.joined()
+		} else {
+			var output = [UInt8](repeating: 0, count: Int(BLAKE3_OUT_LEN))
+			blake3_hasher_finalize(&newBLAKE3State, &output, Int(BLAKE3_OUT_LEN))
+			newHash = output.map { String(format: "%02x", $0) }.joined()
+		}
+
+		var upgradedRecord = record
+		upgradedRecord.hash = newHash
+		upgradedRecord.hashAlgorithm = newAlgorithm
+		upgradedRecord.lastVerified = Date()
+		upgradedRecord.status = .ok
+		return .upgraded(upgradedRecord)
 	}
 
 	// MARK: - Progress helpers

@@ -144,4 +144,38 @@ final class HashUpgradeScannerTests: XCTestCase {
         XCTAssertEqual(result2.skipped, 0)
         XCTAssertEqual(result2.corrupted, 0)
     }
+
+    /// Regression guard for the autorelease leak: upgrading a 512 MiB file from
+    /// sha256 to blake3 must not grow resident memory by anything close to the
+    /// file size, and the record must carry the BLAKE3 digest afterwards.
+    func testUpgrade_largeFileDoesNotRetainChunks() async throws {
+        let url = tempDir.appendingPathComponent("sparse-512mib.bin")
+        let byteCount = 512 * 1024 * 1024
+        try ResidentMemory.makeSparseFile(at: url, byteCount: byteCount)
+        let sha256Hash = try SHA256Hasher().hash(fileAt: url)
+        let expectedBlake3Hash = try BLAKE3Hasher().hash(fileAt: url)
+        let now = Date()
+
+        try store.upsert(FileRecord(
+            path: url.path, size: Int64(byteCount), mtime: now,
+            hash: sha256Hash, hashAlgorithm: "sha256",
+            firstSeen: now, lastVerified: now, status: .ok
+        ))
+
+        let upgrader = HashUpgradeScanner(store: store, config: config, alertManager: alertManager, logger: logger)
+        let before = ResidentMemory.currentBytes()
+        let result = try await upgrader.upgrade(from: "sha256", to: "blake3")
+        let after = ResidentMemory.currentBytes()
+
+        XCTAssertEqual(result.upgraded, 1)
+        XCTAssertEqual(result.corrupted, 0)
+        XCTAssertEqual(result.skipped, 0)
+        let upgradedRecord = try store.record(for: url.path)
+        XCTAssertEqual(upgradedRecord?.hashAlgorithm, "blake3")
+        XCTAssertEqual(upgradedRecord?.hash, expectedBlake3Hash)
+        guard after >= before else {
+            return
+        }
+        XCTAssertLessThan(after &- before, UInt64(64 * 1024 * 1024))
+    }
 }

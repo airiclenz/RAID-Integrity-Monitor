@@ -104,7 +104,7 @@ NOTES (2026-09-20): new test methods in SHA256HasherTests.swift use tab indentat
 NOTES (2026-09-20): each hasher test file gained a private `ProgressRecorder` (NSLock-guarded) so the `@Sendable` progress handler can collect calls without data-race warnings.
 NOTES (2026-09-20): bite check confirmed locally — against the HEAD FileHasher.swift both `testHash_largeFileDoesNotRetainChunks` fail (RSS growth 268 MB SHA-256 / 539 MB BLAKE3); with the new loops they pass.
 
-## 3. Fix `HashUpgradeScanner.upgradeFile` leak via `ChunkedFileReader`
+## 3. Fix `HashUpgradeScanner.upgradeFile` leak via `ChunkedFileReader` — ✅ DONE (2026-09-20)
 
 Depends on items 0 and 1.
 
