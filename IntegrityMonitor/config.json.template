@@ -8,7 +8,11 @@
       ".DS_Store",
       "*.tmp",
       "*.part",
-      "Thumbs.db"
+      "Thumbs.db",
+      "*.qcow2",
+      "*.vmdk",
+      "*.vdi",
+      "*.img.raw"
     ],
     "directoryPatterns": [
       "*.lrdata",
@@ -16,7 +20,11 @@
       ".Spotlight-V100",
       ".fseventsd",
       ".Trashes",
-      ".DocumentRevisions-V100"
+      ".DocumentRevisions-V100",
+      "Virtual Machines",
+      "*.utm",
+      "*.vmwarevm",
+      "*.pvm"
     ],
     "minSizeBytes": 0,
     "maxSizeBytes": null

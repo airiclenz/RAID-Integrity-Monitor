@@ -119,4 +119,63 @@ final class ExclusionRulesTests: XCTestCase {
             size: 1024 * 1024
         ))
     }
+
+    // MARK: - Shipped template
+
+    // ============================================================================
+    /// Decodes `config.json.template` with the same `JSONDecoder` that
+    /// `ConfigLoader.load` uses (never `ConfigLoader.load` itself — it validates
+    /// `watchPaths` and creates directories under `~/.local/share`).
+    private func loadTemplateConfig() throws -> Config {
+        let templateURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("config.json.template")
+        let templateData = try Data(contentsOf: templateURL)
+        return try JSONDecoder().decode(Config.self, from: templateData)
+    }
+
+    // ============================================================================
+    func testTemplateExcludesVirtualMachineImages() throws {
+        let config = try loadTemplateConfig()
+        let rules = ExclusionRules(config: config.exclude)
+
+        let excludedDirectories = [
+            "/RAID/Virtual Machines",
+            "/RAID/VMs/Windows.utm",
+            "/RAID/VMs/Ubuntu.vmwarevm",
+            "/RAID/VMs/Win11.pvm",
+        ]
+        for directory in excludedDirectories {
+            XCTAssertFalse(
+                rules.shouldDescend(into: URL(fileURLWithPath: directory)),
+                "Template should not descend into \(directory)"
+            )
+        }
+
+        let excludedFiles = [
+            "/RAID/VMs/data.img.raw",
+            "/RAID/VMs/disk.qcow2",
+            "/RAID/VMs/disk.vmdk",
+            "/RAID/VMs/disk.vdi",
+        ]
+        for file in excludedFiles {
+            XCTAssertFalse(
+                rules.shouldInclude(fileAt: URL(fileURLWithPath: file), size: 1024),
+                "Template should exclude \(file)"
+            )
+        }
+
+        let includedFiles = [
+            "/RAID/Backups/backup.img",
+            "/RAID/Photos/photo.jpg",
+        ]
+        for file in includedFiles {
+            XCTAssertTrue(
+                rules.shouldInclude(fileAt: URL(fileURLWithPath: file), size: 1024),
+                "Template should include \(file)"
+            )
+        }
+    }
 }

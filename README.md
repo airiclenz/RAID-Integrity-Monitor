@@ -158,6 +158,8 @@ List of directories to scan. Must exist at install time. Subdirectories are scan
 
 Pattern matching is case-insensitive (appropriate for HFS+). Standard glob syntax: `*` matches any sequence of characters, `?` matches one character.
 
+Virtual machine bundles and disk images are excluded by default on fresh installs: `directoryPatterns` carries `"Virtual Machines"`, `"*.utm"`, `"*.vmwarevm"` and `"*.pvm"`, and `pathPatterns` carries `"*.qcow2"`, `"*.vmdk"`, `"*.vdi"` and `"*.img.raw"`. These files change on every VM boot, so tracking them only produces modified-file noise and hours of hashing. Reinstalling merges top-level keys only and `exclude` already exists in every installed config, so existing installs must add these patterns to `exclude` by hand.
+
 #### Hash algorithm
 
 ```json

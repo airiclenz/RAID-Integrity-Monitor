@@ -121,7 +121,10 @@ cd IntegrityMonitor && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer 
 Bite check: `testUpgrade_largeFileDoesNotRetainChunks` must fail against the pre-item tree.
 **Commit:** `fix(upgrade): stream chunks through ChunkedFileReader in upgradeFile`
 
-## 4. Exclude VM disk images by default
+## 4. Exclude VM disk images by default — ✅ DONE (2026-09-20)
+
+NOTES (2026-09-20): new test code uses the 4-space indentation of the existing `ExclusionRulesTests.swift` rather than tabs, to avoid mixed indentation in one file; the test file was not restyled.
+NOTES (2026-09-20): bite check confirmed locally — `testTemplateExcludesVirtualMachineImages` fails (8 assertions) against the HEAD template and passes with the new patterns.
 
 **What:** In `IntegrityMonitor/config.json.template` add to `exclude.directoryPatterns`: `"Virtual Machines"`, `"*.utm"`, `"*.vmwarevm"`, `"*.pvm"`; add to `exclude.pathPatterns`: `"*.qcow2"`, `"*.vmdk"`, `"*.vdi"`, `"*.img.raw"`. `maxSizeBytes` stays `null`. In `README.md` "Configuration" (`pathPatterns` / `directoryPatterns` rows, ~L146-156) mention that VM bundles and disk images are excluded by default because they change on every VM boot. No code change — `ExclusionRules` already matches `directoryPatterns` on `lastPathComponent` and `pathPatterns` on both full path and filename.
 **Regression guard.** (a) `ConfigLoader.load(from:)` validates `watchPaths` (the template's `/Volumes/VOLUME_NAME` does not exist → throws "No watchPaths are currently accessible") and runs `createDirectories`, writing `~/.local/share/raid-integrity-monitor/` on the test machine. Pin the test to `JSONDecoder().decode(Config.self, from: Data(contentsOf: templateURL))` — never `ConfigLoader.load`; the test must not touch `~/.local/share`. (b) `install.sh` merges top-level keys only and `exclude` already exists in every installed config, so "excluded by default" is false for reinstalled machines. In the README paragraph this item adds, state "on fresh installs; existing configs: add the patterns to `exclude` by hand" (deep-merge is out of scope per the plan header).
