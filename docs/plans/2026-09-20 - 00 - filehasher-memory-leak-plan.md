@@ -159,7 +159,13 @@ cd IntegrityMonitor && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer 
 ```
 **Commit:** `feat(db): add recentScans(limit:) and lastEvent(ofType:) to ManifestStore`
 
-## 6. Scheduler backoff after consecutive incomplete scans
+## 6. Scheduler backoff after consecutive incomplete scans — ✅ DONE (2026-09-20)
+
+NOTES (2026-09-20): the `scan_backoff` event type lives as `ScanSchedulePolicy.backoffEventType` rather than in the `ScanEvent` well-known-constants extension, because `Models.swift` is not in this item's file list; main.swift references the constant instead of a bare literal.
+NOTES (2026-09-20): `ScanSchedulePolicy.hasReachedIncompleteThreshold(_:)` is exposed as a public static so `main.swift` can gate the `lastEvent(ofType:)` query (regression guard a) with the same rule the policy uses instead of duplicating the 3-incomplete check.
+NOTES (2026-09-20): the "3" in the warn line and alert body is literal text (the acceptance grep requires the exact phrase); the threshold that governs behaviour is the `incompleteScanThreshold` constant.
+NOTES (2026-09-20): consequential edit — CLAUDE.md: made necessary by the new `Scanning/ScanSchedulePolicy.swift` module (module table row) and the backoff rule in the "LaunchAgent schedule" paragraph.
+NOTES (2026-09-20): CLI journey check done against a temp config/DB: 3 seeded incomplete scans → WARN + alert + one `scan_backoff` event; second tick → WARN only, no new event; scans older than the interval → scan runs. Pre-existing display quirk: "last completed Nh ago" prints a huge number when no completion is known (also true before this item when the DB had no completed scan).
 
 Depends on item 5.
 

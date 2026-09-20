@@ -57,7 +57,7 @@ Hashing uses `withThrowingTaskGroup` with a manual drain loop: add `maxHashThrea
 v2 uses `diskutil info /dev/<disk>` for SMART, not `smartctl`. This requires no brew dependency and is built into macOS. The relevant field is `SMART Status:` with values `Verified` / `Failing` / `Not Supported`.
 
 ### LaunchAgent schedule
-The LaunchAgent uses `StartInterval` (default every 5 minutes, controlled by `schedule.raidCheckIntervalMinutes`). Each invocation always runs the RAID health check. File integrity scans only run when `schedule.fileScanIntervalHours` has elapsed since the last completed scan. The `--mode scheduled` (default) implements this logic.
+The LaunchAgent uses `StartInterval` (default every 5 minutes, controlled by `schedule.raidCheckIntervalMinutes`). Each invocation always runs the RAID health check. File integrity scans only run when `schedule.fileScanIntervalHours` has elapsed since the last completed scan. The `--mode scheduled` (default) implements this logic via `ScanSchedulePolicy`. If the 3 most recent `scans` rows all have `completed_at IS NULL`, the file scan is skipped until `fileScanIntervalHours` has elapsed since the newest `started_at`; a `scan_backoff` event is logged and one alert sent per episode (threshold is a hardcoded constant, not config).
 
 ## Module structure
 
@@ -74,6 +74,7 @@ The LaunchAgent uses `StartInterval` (default every 5 minutes, controlled by `sc
 | `Hashing/ChunkedFileReader.swift` | `ChunkedFileReader` | POSIX open/read/close chunk streaming through one reusable buffer |
 | `Scanning/ExclusionRules.swift` | `ExclusionRules` | fnmatch glob matching with FNM_CASEFOLD |
 | `Scanning/FileScanner.swift` | `FileScanner` (actor) | 4-phase scan orchestration |
+| `Scanning/ScanSchedulePolicy.swift` | `ScanSchedulePolicy` | Pure scheduled-mode decision: due / not due / backoff after 3 incomplete scans |
 | `Notifications/AlertChannel.swift` | `MacOSAlertChannel`, `AlertManager` | Notification dispatch, config-driven filtering |
 | `Upgrade/HashUpgradeScanner.swift` | `HashUpgradeScanner` | Hash algorithm migration with verify-before-upgrade |
 | `IntegrityMonitorCLI/main.swift` | — | CLI arg parsing, dependency wiring, mode dispatch |

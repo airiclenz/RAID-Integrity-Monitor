@@ -285,10 +285,12 @@ Look for `DevNode` entries like `disk8s2` — the parent disk is `disk8`.
 | Setting | Default | Description |
 |---|---|---|
 | `raidCheckIntervalMinutes` | `5` | How often the LaunchAgent runs and checks RAID health. Also controls how quickly a degraded array is detected. |
-| `fileScanIntervalHours` | `24` | Minimum hours between file integrity scans. The binary checks the last completed scan timestamp and only runs file phases when this interval has elapsed. |
+| `fileScanIntervalHours` | `24` | Minimum hours between file integrity scans. The binary checks the last completed scan timestamp and only runs file phases when this interval has elapsed. Also the backoff window: after 3 consecutive scans that never completed, the scheduler waits this long after the newest one started before retrying. |
 | `verificationIntervalDays` | `30` | How often each file is re-verified. Every file in your library is re-hashed at least once per interval, spread evenly across scans. |
 
 The LaunchAgent runs every `raidCheckIntervalMinutes`. Each invocation always performs a RAID health check (fast — just `diskutil` calls). File integrity scanning (directory walk, hashing, re-verification) only runs when `fileScanIntervalHours` has elapsed since the last completed scan. This gives you frequent RAID monitoring without redundant file hashing.
+
+If the 3 most recent scans all died before completing (killed by the system, crashed, or interrupted — a manual `--mode scan` ended with Ctrl+C counts as incomplete too), the scheduler backs off: it skips the file scan until a full `fileScanIntervalHours` has elapsed since the newest of those scans started, logs a warning on every tick, and sends one "Integrity scan keeps failing" notification per episode (gated by `notifications.onScanCompleteWithIssues`). `--mode scan` and `--mode scan-files` still run immediately; a completed scan clears the backoff.
 
 Changing `raidCheckIntervalMinutes` requires a reinstall (`./install.sh`) to update the LaunchAgent schedule. All other config changes take effect immediately on the next scan.
 
@@ -348,7 +350,7 @@ raid-integrity-monitor --mode <mode>
 
 | Mode | Description |
 |---|---|
-| `scheduled` | LaunchAgent mode (default): always runs RAID check, runs file scan only when `fileScanIntervalHours` has elapsed since the last scan |
+| `scheduled` | LaunchAgent mode (default): always runs RAID check, runs file scan only when `fileScanIntervalHours` has elapsed since the last scan. After 3 consecutive incomplete scans (killed, crashed or Ctrl+C'd) it waits a full interval before retrying and notifies once |
 | `scan` | Full scan: RAID check + file integrity — runs everything immediately regardless of schedule. New files are indexed automatically. |
 | `scan-files` | File integrity only — no RAID check |
 | `scan-raid` | RAID health check only — prints current array status |

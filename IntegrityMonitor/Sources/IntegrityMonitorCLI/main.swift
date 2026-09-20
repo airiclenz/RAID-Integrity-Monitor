@@ -250,13 +250,24 @@ func run() async throws -> Int32 {
 			}
 		}
 
-		// Run file scan only if enough time has elapsed
+		// Run file scan only if enough time has elapsed — and back off when the
+		// most recent scans keep dying before they complete
 		let fileScanIntervalSeconds = Double(config.schedule.fileScanIntervalHours) * 3600
-		let lastScan = try store.lastScan()
-		let lastFileScanTime = lastScan?.completedAt ?? .distantPast
-		let elapsed = Date().timeIntervalSince(lastFileScanTime)
+		let recentScans = try store.recentScans(limit: ScanSchedulePolicy.incompleteScanThreshold)
+		// The events table is unindexed; only look up the backoff event when it can matter
+		let lastBackoffEvent = ScanSchedulePolicy.hasReachedIncompleteThreshold(recentScans)
+			? try store.lastEvent(ofType: ScanSchedulePolicy.backoffEventType)
+			: nil
+		let decision = ScanSchedulePolicy().decide(
+			recentScans: recentScans,
+			lastBackoffEvent: lastBackoffEvent,
+			now: Date(),
+			fileScanInterval: fileScanIntervalSeconds
+		)
 
-		if elapsed >= fileScanIntervalSeconds {
+		switch decision {
+		case .runScan(let lastCompleted):
+			let elapsed = Date().timeIntervalSince(lastCompleted ?? .distantPast)
 			logger.info("\(Logger.c("Scheduled run:", .boldCyan)) file scan due (last completed \(Logger.c("\(Int(elapsed / 3600))h", .boldWhite)) ago)")
 			let hasher = try HasherFactory.make(for: config.hashAlgorithm)
 			let exclusions = ExclusionRules(config: config.exclude)
@@ -274,9 +285,26 @@ func run() async throws -> Int32 {
 				logger: logger
 			)
 			_ = try await scanner.scan(mode: .filesOnly)
-		} else {
-			let nextIn = Int((fileScanIntervalSeconds - elapsed) / 3600)
-			logger.info("\(Logger.c("Scheduled run:", .boldCyan)) file scan not due yet (next in \(Logger.c("~\(nextIn)h", .boldWhite)))")
+		case .notDue(let nextIn):
+			let nextInHours = Int(nextIn / 3600)
+			logger.info("\(Logger.c("Scheduled run:", .boldCyan)) file scan not due yet (next in \(Logger.c("~\(nextInHours)h", .boldWhite)))")
+		case .backoff(let consecutiveIncomplete, let retryIn, let shouldAlert):
+			let retryInHours = Int(retryIn / 3600)
+			logger.warn("\(Logger.c("Scheduled run:", .boldCyan)) skipping file scan — 3 consecutive scans never completed; retrying in \(Logger.c("~\(retryInHours)h", .boldWhite))")
+			guard shouldAlert else { break }
+			alertManager.sendIfEnabled(
+				scanComplete: Alert(
+					title: "Integrity scan keeps failing",
+					subtitle: "",
+					body: "3 consecutive scans on this machine were killed, crashed or interrupted before completing. Next retry in ~\(retryInHours)h. Check the log.",
+					severity: .warning
+				),
+				hasIssues: true
+			)
+			try store.logEvent(ScanEvent(
+				eventType: ScanSchedulePolicy.backoffEventType,
+				detail: "{\"consecutiveIncomplete\":\(consecutiveIncomplete)}"
+			))
 		}
 
 	case "scan":
