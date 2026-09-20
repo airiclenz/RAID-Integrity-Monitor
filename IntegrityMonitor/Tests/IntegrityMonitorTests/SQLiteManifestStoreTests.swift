@@ -272,6 +272,63 @@ final class SQLiteManifestStoreTests: XCTestCase {
         XCTAssertNil(last)
     }
 
+    // MARK: - Recent scans
+
+    /// Inserts four scans with distinct `startedAt` values and completes only
+    /// the oldest one via `updateScan`.
+    private func insertFourScansCompletingOldest() throws {
+        var oldest = ScanResult(startedAt: Date(timeIntervalSince1970: 1000))
+        oldest.id = try store.insertScan(oldest)
+        oldest.completedAt = Date(timeIntervalSince1970: 1500)
+        oldest.status = .completed
+        try store.updateScan(oldest)
+
+        for seconds in [2000.0, 3000.0, 4000.0] {
+            _ = try store.insertScan(ScanResult(startedAt: Date(timeIntervalSince1970: seconds)))
+        }
+    }
+
+    func testRecentScans_returnsNewestFirstRespectingLimit() throws {
+        try insertFourScansCompletingOldest()
+
+        let recent = try store.recentScans(limit: 3)
+
+        XCTAssertEqual(recent.count, 3)
+        XCTAssertEqual(
+            recent.map { $0.startedAt.timeIntervalSince1970 },
+            [4000, 3000, 2000]
+        )
+        XCTAssertTrue(recent.allSatisfy { $0.completedAt == nil })
+    }
+
+    func testRecentScans_limitLargerThanRowCountReturnsAll() throws {
+        try insertFourScansCompletingOldest()
+
+        let recent = try store.recentScans(limit: 10)
+
+        XCTAssertEqual(recent.count, 4)
+        XCTAssertEqual(recent.last?.startedAt.timeIntervalSince1970, 1000)
+        XCTAssertNotNil(recent.last?.completedAt)
+    }
+
+    func testRecentScans_returnsEmptyWhenNoScans() throws {
+        let recent = try store.recentScans(limit: 3)
+        XCTAssertTrue(recent.isEmpty)
+    }
+
+    func testRecentScans_repeatedCallsReturnIdenticalResults() throws {
+        try insertFourScansCompletingOldest()
+
+        let first = try store.recentScans(limit: 3)
+        let second = try store.recentScans(limit: 3)
+
+        XCTAssertEqual(first.map { $0.id }, second.map { $0.id })
+        XCTAssertEqual(
+            first.map { $0.startedAt.timeIntervalSince1970 },
+            second.map { $0.startedAt.timeIntervalSince1970 }
+        )
+    }
+
     // MARK: - Events
 
     func testLogEvent_doesNotThrow() throws {
@@ -337,6 +394,57 @@ final class SQLiteManifestStoreTests: XCTestCase {
         let event = try store.lastRaidEvent()
         XCTAssertNotNil(event)
         XCTAssertEqual(event?.eventType, ScanEvent.raidDisappeared)
+    }
+
+    // MARK: - Last event of type
+
+    func testLastEventOfType_returnsNilWhenNoMatchingEvents() throws {
+        let event = try store.lastEvent(ofType: "scan_backoff")
+        XCTAssertNil(event)
+    }
+
+    func testLastEventOfType_returnsNewestMatchingEvent() throws {
+        try store.logEvent(ScanEvent(
+            timestamp: Date(timeIntervalSince1970: 1000),
+            eventType: "scan_backoff",
+            detail: "first"
+        ))
+        try store.logEvent(ScanEvent(
+            timestamp: Date(timeIntervalSince1970: 2000),
+            eventType: "scan_backoff",
+            detail: "second"
+        ))
+        try store.logEvent(ScanEvent(
+            timestamp: Date(timeIntervalSince1970: 3000),
+            eventType: ScanEvent.raidDegraded,
+            detail: "degraded"
+        ))
+
+        let event = try store.lastEvent(ofType: "scan_backoff")
+
+        XCTAssertNotNil(event)
+        XCTAssertEqual(event?.eventType, "scan_backoff")
+        XCTAssertEqual(event?.detail, "second")
+        XCTAssertEqual(event?.timestamp.timeIntervalSince1970, 2000)
+    }
+
+    func testLastEventOfType_repeatedCallsReturnIdenticalResults() throws {
+        try store.logEvent(ScanEvent(
+            timestamp: Date(timeIntervalSince1970: 1000),
+            eventType: "scan_backoff",
+            detail: "first"
+        ))
+        try store.logEvent(ScanEvent(
+            timestamp: Date(timeIntervalSince1970: 2000),
+            eventType: "scan_backoff",
+            detail: "second"
+        ))
+
+        let first = try store.lastEvent(ofType: "scan_backoff")
+        let second = try store.lastEvent(ofType: "scan_backoff")
+
+        XCTAssertEqual(first?.id, second?.id)
+        XCTAssertEqual(first?.detail, second?.detail)
     }
 
     // MARK: - Algorithm query

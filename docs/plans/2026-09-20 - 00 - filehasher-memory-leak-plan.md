@@ -138,7 +138,9 @@ cd IntegrityMonitor && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer 
 ```
 **Commit:** `feat(config): exclude VM bundles and disk images by default`
 
-## 5. `ManifestStore`: `recentScans(limit:)` and `lastEvent(ofType:)`
+## 5. `ManifestStore`: `recentScans(limit:)` and `lastEvent(ofType:)` — ✅ DONE (2026-09-20)
+
+NOTES (2026-09-20): new tests use the test file's existing 4-space indentation rather than tabs, matching the surrounding `SQLiteManifestStoreTests.swift` style.
 
 Depends on item 0.
 

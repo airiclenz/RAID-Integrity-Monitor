@@ -128,8 +128,18 @@ public final class MirroredManifestStore: ManifestStore {
 	}
 
 	// ============================================================================
+	public func lastEvent(ofType eventType: String) throws -> ScanEvent? {
+		try primary.lastEvent(ofType: eventType)
+	}
+
+	// ============================================================================
 	public func lastScan() throws -> ScanResult? {
 		try primary.lastScan()
+	}
+
+	// ============================================================================
+	public func recentScans(limit: Int) throws -> [ScanResult] {
+		try primary.recentScans(limit: limit)
 	}
 
 	// ============================================================================

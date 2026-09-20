@@ -34,9 +34,11 @@ public final class SQLiteManifestStore: ManifestStore {
 	private var stmtDeleteFile: OpaquePointer?
 	private var stmtInsertEvent: OpaquePointer?
 	private var stmtLastRaidEvent: OpaquePointer?
+	private var stmtLastEventOfType: OpaquePointer?
 	private var stmtInsertScan: OpaquePointer?
 	private var stmtUpdateScan: OpaquePointer?
 	private var stmtLastScan: OpaquePointer?
+	private var stmtRecentScans: OpaquePointer?
 	private var stmtFilesToVerify: OpaquePointer?
 	private var stmtAllFilesToVerify: OpaquePointer?
 	private var stmtSelectByAlgorithm: OpaquePointer?
@@ -76,14 +78,16 @@ public final class SQLiteManifestStore: ManifestStore {
 	public func close() {
 		let stmts: [OpaquePointer?] = [
 			stmtUpsertFile, stmtSelectFile, stmtAllPaths, stmtDeleteFile,
-			stmtInsertEvent, stmtLastRaidEvent, stmtInsertScan, stmtUpdateScan, stmtLastScan,
+			stmtInsertEvent, stmtLastRaidEvent, stmtLastEventOfType, stmtInsertScan, stmtUpdateScan,
+			stmtLastScan, stmtRecentScans,
 			stmtFilesToVerify, stmtAllFilesToVerify, stmtSelectByAlgorithm,
 			stmtCountByAlgorithm, stmtAllRecords
 		]
 		for stmt in stmts { sqlite3_finalize(stmt) }
 		stmtUpsertFile = nil; stmtSelectFile = nil; stmtAllPaths = nil
-		stmtDeleteFile = nil; stmtInsertEvent = nil; stmtLastRaidEvent = nil; stmtInsertScan = nil
-		stmtUpdateScan = nil; stmtLastScan = nil; stmtFilesToVerify = nil
+		stmtDeleteFile = nil; stmtInsertEvent = nil; stmtLastRaidEvent = nil; stmtLastEventOfType = nil
+		stmtInsertScan = nil; stmtUpdateScan = nil; stmtLastScan = nil; stmtRecentScans = nil
+		stmtFilesToVerify = nil
 		stmtAllFilesToVerify = nil; stmtSelectByAlgorithm = nil
 		stmtCountByAlgorithm = nil; stmtAllRecords = nil
 
@@ -300,26 +304,24 @@ public final class SQLiteManifestStore: ManifestStore {
 		guard rc == SQLITE_ROW else {
 			throw AppError.database("SELECT last RAID event failed: \(dbError())")
 		}
+		return extractScanEvent(from: stmt)
+	}
 
-		let id = sqlite3_column_int64(stmt, 0)
-		let timestamp = Date(
-			timeIntervalSince1970: sqlite3_column_double(stmt, 1)
-		)
-		let eventType = String(cString: sqlite3_column_text(stmt, 2))
-		let path: String? = sqlite3_column_type(stmt, 3) == SQLITE_NULL
-			? nil
-			: String(cString: sqlite3_column_text(stmt, 3))
-		let detail: String? = sqlite3_column_type(stmt, 4) == SQLITE_NULL
-			? nil
-			: String(cString: sqlite3_column_text(stmt, 4))
+	// ============================================================================
+	public func lastEvent(ofType eventType: String) throws -> ScanEvent? {
+		guard let stmt = stmtLastEventOfType else {
+			throw AppError.database("Database not open")
+		}
+		defer { sqlite3_reset(stmt) }
 
-		return ScanEvent(
-			id: id,
-			timestamp: timestamp,
-			eventType: eventType,
-			path: path,
-			detail: detail
-		)
+		sqlite3_bind_text(stmt, 1, eventType, -1, SQLITE_TRANSIENT)
+
+		let rc = sqlite3_step(stmt)
+		if rc == SQLITE_DONE { return nil }
+		guard rc == SQLITE_ROW else {
+			throw AppError.database("SELECT last event of type failed: \(dbError())")
+		}
+		return extractScanEvent(from: stmt)
 	}
 
 	// MARK: - Scans
@@ -375,6 +377,25 @@ public final class SQLiteManifestStore: ManifestStore {
 			throw AppError.database("SELECT last scan failed: \(dbError())")
 		}
 		return extractScanResult(from: stmt)
+	}
+
+	// ============================================================================
+	public func recentScans(limit: Int) throws -> [ScanResult] {
+		guard let stmt = stmtRecentScans else { throw AppError.database("Database not open") }
+		defer { sqlite3_reset(stmt) }
+
+		sqlite3_bind_int(stmt, 1, Int32(limit))
+
+		var results: [ScanResult] = []
+		while true {
+			let rc = sqlite3_step(stmt)
+			if rc == SQLITE_DONE { break }
+			guard rc == SQLITE_ROW else {
+				throw AppError.database("SELECT recent scans failed: \(dbError())")
+			}
+			results.append(extractScanResult(from: stmt))
+		}
+		return results
 	}
 
 	// MARK: - Rolling verification
@@ -551,6 +572,14 @@ public final class SQLiteManifestStore: ManifestStore {
 			LIMIT 1
 			""")
 
+		stmtLastEventOfType = try prepare("""
+			SELECT id, timestamp, event_type, path, detail
+			FROM events
+			WHERE event_type = ?
+			ORDER BY timestamp DESC
+			LIMIT 1
+			""")
+
 		stmtInsertScan = try prepare("INSERT INTO scans (started_at, status) VALUES (?, ?)")
 
 		stmtUpdateScan = try prepare("""
@@ -574,6 +603,13 @@ public final class SQLiteManifestStore: ManifestStore {
 				   files_walked, files_skipped, files_inaccessible, files_new, files_modified,
 				   files_verified, files_corrupted, files_missing, files_upgraded, status
 			FROM scans ORDER BY started_at DESC LIMIT 1
+			""")
+
+		stmtRecentScans = try prepare("""
+			SELECT id, started_at, completed_at,
+				   files_walked, files_skipped, files_inaccessible, files_new, files_modified,
+				   files_verified, files_corrupted, files_missing, files_upgraded, status
+			FROM scans ORDER BY started_at DESC LIMIT ?
 			""")
 
 		stmtFilesToVerify = try prepare("""
@@ -718,6 +754,29 @@ public final class SQLiteManifestStore: ManifestStore {
 			filesMissing: missing,
 			filesUpgraded: upgraded,
 			status: status
+		)
+	}
+
+	// ============================================================================
+	private func extractScanEvent(from stmt: OpaquePointer) -> ScanEvent {
+		let id = sqlite3_column_int64(stmt, 0)
+		let timestamp = Date(
+			timeIntervalSince1970: sqlite3_column_double(stmt, 1)
+		)
+		let eventType = String(cString: sqlite3_column_text(stmt, 2))
+		let path: String? = sqlite3_column_type(stmt, 3) == SQLITE_NULL
+			? nil
+			: String(cString: sqlite3_column_text(stmt, 3))
+		let detail: String? = sqlite3_column_type(stmt, 4) == SQLITE_NULL
+			? nil
+			: String(cString: sqlite3_column_text(stmt, 4))
+
+		return ScanEvent(
+			id: id,
+			timestamp: timestamp,
+			eventType: eventType,
+			path: path,
+			detail: detail
 		)
 	}
 

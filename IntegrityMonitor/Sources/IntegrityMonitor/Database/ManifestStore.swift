@@ -39,11 +39,19 @@ public protocol ManifestStore: AnyObject {
 	/// Used for state-change detection to suppress duplicate alerts.
 	func lastRaidEvent() throws -> ScanEvent?
 
+	/// Return the most recent event with the given `event_type`, or nil if none
+	/// exists. Used by the scheduler to detect an already-alerted backoff.
+	func lastEvent(ofType eventType: String) throws -> ScanEvent?
+
 	// MARK: Scans
 	/// Insert a new scan row and return its rowid.
 	func insertScan(_ scan: ScanResult) throws -> Int64
 	func updateScan(_ scan: ScanResult) throws
 	func lastScan() throws -> ScanResult?
+
+	/// Return up to `limit` scan rows, newest first by `started_at`.
+	/// Used by the scheduler to detect consecutive incomplete scans.
+	func recentScans(limit: Int) throws -> [ScanResult]
 
 	// MARK: Rolling verification
 	/// Return up to `limit` file records whose `last_verified` is older than `date`,
