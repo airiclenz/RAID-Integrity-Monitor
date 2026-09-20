@@ -267,8 +267,14 @@ func run() async throws -> Int32 {
 
 		switch decision {
 		case .runScan(let lastCompleted):
-			let elapsed = Date().timeIntervalSince(lastCompleted ?? .distantPast)
-			logger.info("\(Logger.c("Scheduled run:", .boldCyan)) file scan due (last completed \(Logger.c("\(Int(elapsed / 3600))h", .boldWhite)) ago)")
+			let lastCompletedDescription: String
+			if let lastCompleted {
+				let elapsedHours = Int(Date().timeIntervalSince(lastCompleted) / 3600)
+				lastCompletedDescription = "last completed \(Logger.c("\(elapsedHours)h", .boldWhite)) ago"
+			} else {
+				lastCompletedDescription = Logger.c("no completed scan on record", .boldWhite)
+			}
+			logger.info("\(Logger.c("Scheduled run:", .boldCyan)) file scan due (\(lastCompletedDescription))")
 			let hasher = try HasherFactory.make(for: config.hashAlgorithm)
 			let exclusions = ExclusionRules(config: config.exclude)
 			let raidScanner = RAIDScanner(
