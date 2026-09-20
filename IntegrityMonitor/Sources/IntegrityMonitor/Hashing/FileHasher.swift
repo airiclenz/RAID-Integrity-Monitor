@@ -59,29 +59,11 @@ public struct SHA256Hasher: FileHasher {
 		fileAt url: URL,
 		onProgress: HashProgressHandler?
 	) throws -> String {
-		let handle: FileHandle
-		do {
-			handle = try FileHandle(forReadingFrom: url)
-		} catch {
-			throw AppError.fileAccess(path: url.path, underlying: error)
-		}
-		defer { try? handle.close() }
-
-		let totalSize: Int64 = Int64(
-			(try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-		)
 		var bytesProcessed: Int64 = 0
 		var hasher = CryptoKit.SHA256()
 
-		while true {
-			let chunk: Data
-			do {
-				chunk = try handle.read(upToCount: chunkSize) ?? Data()
-			} catch {
-				throw AppError.fileAccess(path: url.path, underlying: error)
-			}
-			if chunk.isEmpty { break }
-			hasher.update(data: chunk)
+		try ChunkedFileReader.forEachChunk(of: url, chunkSize: chunkSize) { chunk, totalSize in
+			hasher.update(bufferPointer: chunk)
 			bytesProcessed += Int64(chunk.count)
 			onProgress?(bytesProcessed, totalSize)
 		}
@@ -118,36 +100,16 @@ public struct BLAKE3Hasher: FileHasher {
 		fileAt url: URL,
 		onProgress: HashProgressHandler?
 	) throws -> String {
-		let handle: FileHandle
-		do {
-			handle = try FileHandle(forReadingFrom: url)
-		} catch {
-			throw AppError.fileAccess(path: url.path, underlying: error)
-		}
-		defer { try? handle.close() }
-
-		let totalSize: Int64 = Int64(
-			(try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-		)
 		var bytesProcessed: Int64 = 0
 		var hasher = blake3_hasher()
 		blake3_hasher_init(&hasher)
 
-		while true {
-			let chunk: Data
-			do {
-				chunk = try handle.read(upToCount: chunkSize) ?? Data()
-			} catch {
-				throw AppError.fileAccess(path: url.path, underlying: error)
-			}
-			if chunk.isEmpty { break }
-			chunk.withUnsafeBytes { buffer in
-				blake3_hasher_update(
-					&hasher,
-					buffer.baseAddress,
-					buffer.count
-				)
-			}
+		try ChunkedFileReader.forEachChunk(of: url, chunkSize: chunkSize) { chunk, totalSize in
+			blake3_hasher_update(
+				&hasher,
+				chunk.baseAddress,
+				chunk.count
+			)
 			bytesProcessed += Int64(chunk.count)
 			onProgress?(bytesProcessed, totalSize)
 		}

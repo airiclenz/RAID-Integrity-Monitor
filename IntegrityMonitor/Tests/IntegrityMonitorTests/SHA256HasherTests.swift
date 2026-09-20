@@ -103,4 +103,75 @@ final class SHA256HasherTests: XCTestCase {
             XCTAssertEqual(name, "md5")
         }
     }
+
+	// ============================================================================
+	/// Regression guard for the autorelease leak: hashing a 512 MiB file must not
+	/// grow resident memory by anything close to the file size.
+	func testHash_largeFileDoesNotRetainChunks() throws {
+		let file = tempDir.appendingPathComponent("sparse-512mib.bin")
+		let byteCount = 512 * 1024 * 1024
+		try ResidentMemory.makeSparseFile(at: file, byteCount: byteCount)
+
+		let hasher = SHA256Hasher()
+		let before = ResidentMemory.currentBytes()
+		let digest = try hasher.hash(fileAt: file)
+		let after = ResidentMemory.currentBytes()
+
+		XCTAssertEqual(digest.count, 64)
+		guard after >= before else {
+			return
+		}
+		XCTAssertLessThan(after &- before, UInt64(64 * 1024 * 1024))
+	}
+
+	// ============================================================================
+	/// Progress is reported once per chunk with a monotonically increasing byte
+	/// count and the fstat total size.
+	func testHash_progressReportsMonotonicAndTotal() throws {
+		let file = tempDir.appendingPathComponent("progress-10mib.bin")
+		let mebibyte = 1024 * 1024
+		try Data(repeating: 0x5A, count: 10 * mebibyte).write(to: file)
+
+		let recorder = ProgressRecorder()
+		let hasher = SHA256Hasher(chunkSize: 4 * mebibyte)
+		_ = try hasher.hash(fileAt: file) { processed, total in
+			recorder.record(processed: processed, total: total)
+		}
+
+		let expected: [[Int64]] = [
+			[Int64(4 * mebibyte), Int64(10 * mebibyte)],
+			[Int64(8 * mebibyte), Int64(10 * mebibyte)],
+			[Int64(10 * mebibyte), Int64(10 * mebibyte)]
+		]
+		XCTAssertEqual(recorder.calls, expected)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MARK: - ProgressRecorder
+// ---------------------------------------------------------------------------
+
+/// Thread-safe collector for `HashProgressHandler` invocations.
+private final class ProgressRecorder: @unchecked Sendable {
+
+	// ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
+	private let lock = NSLock()
+	private var storedCalls: [[Int64]] = []
+
+	var calls: [[Int64]] {
+		lock.lock()
+		defer { lock.unlock() }
+		return storedCalls
+	}
+
+	// ============================================================================
+	func record(
+		processed: Int64,
+		total: Int64
+	) {
+		lock.lock()
+		defer { lock.unlock() }
+		storedCalls.append([processed, total])
+	}
 }

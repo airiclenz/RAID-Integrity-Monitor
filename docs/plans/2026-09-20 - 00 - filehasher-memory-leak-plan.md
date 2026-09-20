@@ -83,7 +83,7 @@ NOTES (2026-09-20): added a `precondition(chunkSize > 0)` guard — a zero-byte 
 NOTES (2026-09-20): `fstat(2)` failure also throws `AppError.fileAccess` (plan named only open/read failures) rather than silently reporting `totalSize` 0.
 NOTES (2026-09-20): docs — added a `Hashing/ChunkedFileReader.swift` row to the CLAUDE.md module table.
 
-## 2. Fix `SHA256Hasher` / `BLAKE3Hasher` leak via `ChunkedFileReader`
+## 2. Fix `SHA256Hasher` / `BLAKE3Hasher` leak via `ChunkedFileReader` — ✅ DONE (2026-09-20)
 
 Depends on item 1.
 
@@ -100,6 +100,9 @@ cd IntegrityMonitor && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer 
 ```
 Bite check: `testHash_largeFileDoesNotRetainChunks` (both files) must fail against the pre-item tree.
 **Commit:** `fix(hashing): stream file chunks through ChunkedFileReader to stop autorelease growth`
+NOTES (2026-09-20): new test methods in SHA256HasherTests.swift use tab indentation per the standing coding-standards requirement; the pre-existing body of that file uses 4-space indentation and was left untouched (no restyle).
+NOTES (2026-09-20): each hasher test file gained a private `ProgressRecorder` (NSLock-guarded) so the `@Sendable` progress handler can collect calls without data-race warnings.
+NOTES (2026-09-20): bite check confirmed locally — against the HEAD FileHasher.swift both `testHash_largeFileDoesNotRetainChunks` fail (RSS growth 268 MB SHA-256 / 539 MB BLAKE3); with the new loops they pass.
 
 ## 3. Fix `HashUpgradeScanner.upgradeFile` leak via `ChunkedFileReader`
 
