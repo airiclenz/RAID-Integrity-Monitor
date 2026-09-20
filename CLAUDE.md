@@ -71,6 +71,7 @@ The LaunchAgent uses `StartInterval` (default every 5 minutes, controlled by `sc
 | `Database/SQLiteManifestStore.swift` | `SQLiteManifestStore` | Raw sqlite3 C API implementation |
 | `Database/MirroredManifestStore.swift` | `MirroredManifestStore` | Dual-write wrapper: primary required, replica best-effort |
 | `Hashing/FileHasher.swift` | `SHA256Hasher`, `BLAKE3Hasher`, `HasherFactory` | CryptoKit + vendored BLAKE3 streaming hash, factory |
+| `Hashing/ChunkedFileReader.swift` | `ChunkedFileReader` | POSIX open/read/close chunk streaming through one reusable buffer |
 | `Scanning/ExclusionRules.swift` | `ExclusionRules` | fnmatch glob matching with FNM_CASEFOLD |
 | `Scanning/FileScanner.swift` | `FileScanner` (actor) | 4-phase scan orchestration |
 | `Notifications/AlertChannel.swift` | `MacOSAlertChannel`, `AlertManager` | Notification dispatch, config-driven filtering |

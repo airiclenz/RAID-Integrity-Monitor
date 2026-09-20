@@ -60,7 +60,7 @@ Bite check: `testOpen_freshDatabaseSeedsCurrentSchemaVersion` must fail against 
 NOTES (2026-09-20): introduced `private static let currentSchemaVersion = 3` in `SQLiteManifestStore` and interpolated it into the seed statement instead of a bare literal (coding-standards magic-number rule); `runMigrations()` literals untouched.
 NOTES (2026-09-20): new test code uses the 4-space indentation of the existing `SQLiteManifestStoreTests.swift` rather than tabs, to avoid mixed indentation in one file; the test file was not restyled.
 
-## 1. Add `ChunkedFileReader` (POSIX chunk reader)
+## 1. Add `ChunkedFileReader` (POSIX chunk reader) — ✅ DONE (2026-09-20)
 
 **What:** New `IntegrityMonitor/Sources/IntegrityMonitor/Hashing/ChunkedFileReader.swift`, an internal `enum ChunkedFileReader` with one static entry point:
 `static func forEachChunk(of url: URL, chunkSize: Int, body: (_ chunk: UnsafeRawBufferPointer, _ totalSize: Int64) throws -> Void) throws`.
@@ -79,6 +79,9 @@ cd IntegrityMonitor && swift build
 cd IntegrityMonitor && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --filter ChunkedFileReaderTests
 ```
 **Commit:** `feat(hashing): add POSIX ChunkedFileReader with single reusable buffer`
+NOTES (2026-09-20): added a `precondition(chunkSize > 0)` guard — a zero-byte buffer would make `read(2)` return 0 and silently report EOF on a non-empty file.
+NOTES (2026-09-20): `fstat(2)` failure also throws `AppError.fileAccess` (plan named only open/read failures) rather than silently reporting `totalSize` 0.
+NOTES (2026-09-20): docs — added a `Hashing/ChunkedFileReader.swift` row to the CLAUDE.md module table.
 
 ## 2. Fix `SHA256Hasher` / `BLAKE3Hasher` leak via `ChunkedFileReader`
 
