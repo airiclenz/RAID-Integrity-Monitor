@@ -20,6 +20,13 @@ public final class SQLiteManifestStore: ManifestStore {
 
 	// ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
+	// Schema version the DDL in createSchema() produces. A fresh database is
+	// seeded with this value so runMigrations() has nothing to apply; existing
+	// databases at an older version still migrate step by step.
+	private static let currentSchemaVersion = 3
+
+	// ::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
 	// Prepared statements (prepared once in open(), finalized in close())
 	private var stmtUpsertFile: OpaquePointer?
 	private var stmtSelectFile: OpaquePointer?
@@ -470,9 +477,13 @@ public final class SQLiteManifestStore: ManifestStore {
 		CREATE TABLE IF NOT EXISTS schema_version (
 			version INTEGER NOT NULL
 		);
-		INSERT OR IGNORE INTO schema_version VALUES (1);
+		INSERT INTO schema_version (version)
+			SELECT \(Self.currentSchemaVersion)
+			WHERE NOT EXISTS (SELECT 1 FROM schema_version);
 		"""
-		// Execute each statement separately (sqlite3_exec handles multiple with semicolons)
+		// Execute each statement separately (sqlite3_exec handles multiple with semicolons).
+		// schema_version has no UNIQUE constraint, so the seed is guarded by NOT EXISTS
+		// rather than INSERT OR IGNORE — otherwise every open() would append a row.
 		try exec(ddl)
 	}
 

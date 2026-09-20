@@ -43,7 +43,7 @@
 
 ---
 
-## 0. Fix fresh-database schema seed (duplicate `files_inaccessible` column)
+## 0. Fix fresh-database schema seed (duplicate `files_inaccessible` column) — ✅ DONE (2026-09-20)
 
 **What:** Regression from `c77a3ad` ("Add files_inaccessible counter"): `SQLiteManifestStore.createSchema()` already declares `files_inaccessible` in `CREATE TABLE scans` but seeds `INSERT OR IGNORE INTO schema_version VALUES (1)`, so `runMigrations()` immediately runs `ALTER TABLE scans ADD COLUMN files_inaccessible` and `open()` fails with `duplicate column name` on every fresh database (fresh installs and every store-backed test). Fix: seed `schema_version` with the current version (3) in `createSchema()` — the DDL there is the complete current schema, so a fresh DB needs no migrations. Existing DBs at version 1 or 2 still migrate exactly as today. `schema_version` stays 3; no other schema change.
 **Regression guard.** `schema_version` has no UNIQUE constraint, so `INSERT OR IGNORE INTO schema_version VALUES (3)` would append a row on every open and `runMigrations()` reads `SELECT version FROM schema_version LIMIT 1` with no ORDER BY — a v2 DB could then read the stray 3, skip migration 3 and fail in `prepareStatements()`. Seed only when empty: `INSERT INTO schema_version (version) SELECT 3 WHERE NOT EXISTS (SELECT 1 FROM schema_version)`. This keeps the v1/v2 migration path byte-identical and stops row accumulation.
@@ -57,6 +57,8 @@ cd IntegrityMonitor && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer 
 ```
 Bite check: `testOpen_freshDatabaseSeedsCurrentSchemaVersion` must fail against the pre-item tree.
 **Commit:** `fix(db): seed schema_version with current version so fresh databases open`
+NOTES (2026-09-20): introduced `private static let currentSchemaVersion = 3` in `SQLiteManifestStore` and interpolated it into the seed statement instead of a bare literal (coding-standards magic-number rule); `runMigrations()` literals untouched.
+NOTES (2026-09-20): new test code uses the 4-space indentation of the existing `SQLiteManifestStoreTests.swift` rather than tabs, to avoid mixed indentation in one file; the test file was not restyled.
 
 ## 1. Add `ChunkedFileReader` (POSIX chunk reader)
 

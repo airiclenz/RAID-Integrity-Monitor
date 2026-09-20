@@ -1,6 +1,7 @@
 import XCTest
 @testable import IntegrityMonitor
 import Foundation
+import SQLite3
 
 final class SQLiteManifestStoreTests: XCTestCase {
 
@@ -29,6 +30,53 @@ final class SQLiteManifestStoreTests: XCTestCase {
         // If open() didn't throw we have the schema — verify via a round-trip
         let paths = try store.allPaths()
         XCTAssertTrue(paths.isEmpty)
+    }
+
+    func testOpen_freshDatabaseSeedsCurrentSchemaVersion() throws {
+        // Arrange: a fresh on-disk store that must open without running migrations
+        let dbURL = tempDir.appendingPathComponent("fresh.db")
+        let freshStore = SQLiteManifestStore(path: dbURL)
+        try freshStore.open()
+
+        // Act: round-trip a scan whose files_inaccessible column only exists at schema v3
+        var scan = ScanResult(startedAt: Date())
+        scan.id = try freshStore.insertScan(scan)
+        scan.filesInaccessible = 7
+        scan.status = .completed
+        scan.completedAt = Date()
+        try freshStore.updateScan(scan)
+        let lastScan = try freshStore.lastScan()
+
+        freshStore.close()
+        let reopenedStore = SQLiteManifestStore(path: dbURL)
+        try reopenedStore.open()
+        reopenedStore.close()
+
+        // Assert
+        XCTAssertEqual(lastScan?.filesInaccessible, 7)
+        XCTAssertEqual(try readSchemaVersionRows(at: dbURL), [3])
+    }
+
+    /// Reads every row of schema_version with the raw sqlite3 API so the
+    /// assertion does not depend on the store's own migration logic.
+    private func readSchemaVersionRows(at dbURL: URL) throws -> [Int] {
+        var handle: OpaquePointer?
+        guard sqlite3_open(dbURL.path, &handle) == SQLITE_OK, let db = handle else {
+            throw AppError.database("Cannot open \(dbURL.path) for schema_version read")
+        }
+        defer { sqlite3_close(db) }
+
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT version FROM schema_version", -1, &statement, nil) == SQLITE_OK else {
+            throw AppError.database("Cannot prepare schema_version read")
+        }
+        defer { sqlite3_finalize(statement) }
+
+        var versions: [Int] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            versions.append(Int(sqlite3_column_int(statement, 0)))
+        }
+        return versions
     }
 
     // MARK: - Upsert and fetch
